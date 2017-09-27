@@ -21,20 +21,54 @@ current_version() {
 }
 
 which_command() {
-  local plugin_name=$1
-  local plugin_path=$(get_plugin_path $plugin_name)
-  check_if_plugin_exists $plugin_name
-  local install_type="version"
+  local bin_name=$1
+  local shim_path
+  local plugin_name
+  local plugin_versions_and_paths
+  local plugin_versions
 
-  local install_path=$(get_install_path $plugin_name $install_type $(current_version $plugin_name))
+  shim_path="$(asdf_dir)/shims/$bin_name"
 
-  if [ -d $install_path ]; then
-    echo $install_path/bin/$plugin_name
-    exit 0
-  else
-    echo "Version not installed"
+  if [ ! -f "$shim_path" ]; then
+    echo "no shim found for $bin_name"
     exit 1
   fi
+
+  plugin_name="$(sed -ne 's/# asdf-plugin: \(.*\)/\1/p' $shim_path)"
+
+  if [ -z "$plugin_name" ]; then
+    if soft_check_if_plugin_exists "$bin_name"; then
+      plugin_name="$bin_name"
+    else
+      echo "could not determine plugin for $bin_name"
+      exit 1
+    fi
+  fi
+
+  check_if_plugin_exists "$plugin_name"
+
+
+  plugin_versions_and_paths=$(find_version "$plugin_name" "$(pwd)")
+  IFS=' ' read -a plugin_versions <<< "$(cut -d '|' -f 1 <<< "$plugin_versions_and_paths")"
+
+  raw_binary_versions="$(sed -ne 's/# asdf-plugin-version: \(.*\)/\1/p' $shim_path)"
+  read -a binary_versions <<< "$(echo $raw_binary_versions)"
+
+  if [ "${#binary_versions[@]}" -eq 0 ]; then
+    binary_versions=$plugin_versions
+  fi
+
+  for plugin_version in "${plugin_versions[@]}"; do
+    for binary_version in "${binary_versions[@]}"; do
+      if [ "$plugin_version" = "$binary_version" ]; then
+        echo "$(asdf_dir)/installs/$plugin_name/$plugin_version/bin/$bin_name"
+        return 0
+      fi
+    done
+  done
+
+  echo "could not find installed version for $bin_name"
+  exit 1
 }
 
 # Warn if the plugin isn't using the updated legacy file api.
